@@ -28,36 +28,36 @@ ANALIZ_SURESI_AY = 3
 
 # --- Yardımcı Fonksiyonlar ---
 def google_sheets_auth():
-    print("\nGoogle Sheets için kimlik doğrulaması yapılıyor...")
+    print("\n[ADIM 1/4] Google Sheets için kimlik doğrulaması yapılıyor...")
     try:
         if not GSPREAD_CREDENTIALS_SECRET:
-            print("❌ Hata: GCP_SERVICE_ACCOUNT_KEY secret bulunamadı.")
+            print("❌ Hata: GCP_SERVICE_ACCOUNT_KEY secret bulunamadı. Kimlik doğrulama başarısız.")
             sys.exit(1)
         creds_json = json.loads(GSPREAD_CREDENTIALS_SECRET)
         gc = gspread.service_account_from_dict(creds_json)
         print("✅ Kimlik doğrulama başarılı.")
         return gc
     except Exception as e:
-        print(f"❌ Kimlik doğrulama sırasında hata oluştu: {e}")
+        print(f"❌ Kimlik doğrulama sırasında hata oluştu: {e}. İşlem durduruldu.")
         sys.exit(1)
 
 def get_funds_from_gsheet(gc):
-    print(f"\n'{WORKSHEET_NAME_INPUT}' sayfasından fon listesi okunuyor...")
+    print(f"\n[ADIM 2/4] '{WORKSHEET_NAME_INPUT}' sayfasından fon listesi okunuyor...")
     try:
         spreadsheet = gc.open_by_key(SHEET_ID)
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME_INPUT)
         fund_codes = worksheet.col_values(1)[1:] # A2'den başla
         fund_codes = [code for code in fund_codes if code and str(code).strip()]
         if not fund_codes:
-            print(f"⚠️ '{WORKSHEET_NAME_INPUT}' sayfasında fon kodu bulunamadı.")
+            print(f"⚠️ '{WORKSHEET_NAME_INPUT}' sayfasında fon kodu bulunamadı. Analiz edilecek fon yok.")
             return []
-        print(f"✅ {len(fund_codes)} adet fon kodu okundu.")
+        print(f"✅ {len(fund_codes)} adet fon kodu başarıyla okundu.")
         return fund_codes
     except gspread.exceptions.WorksheetNotFound:
-        print(f"❌ Hata: '{WORKSHEET_NAME_INPUT}' adlı çalışma sayfası bulunamadı.")
+        print(f"❌ Hata: '{WORKSHEET_NAME_INPUT}' adlı çalışma sayfası bulunamadı. Lütfen sayfa adını kontrol edin.")
         return []
     except Exception as e:
-        print(f"❌ Google Sheet'ten fon listesi okunurken hata: {e}")
+        print(f"❌ Google Sheet'ten fon listesi okunurken hata: {e}. Fon listesi alınamadı.")
         return []
 
 def fetch_data_for_analysis(args):
@@ -106,6 +106,7 @@ def run_fonaliz_scan(gc, fon_listesi):
     print("     DETAYLI FON ANALİZİ BAŞLATILIYOR")
     print(f"     {len(fon_listesi)} adet fon analiz edilecek...")
     print("="*40)
+    print(f"[ADIM 3/4] Fon verileri TEFAS'tan çekiliyor ve metrikler hesaplanıyor...")
 
     end_date = datetime.now(TIMEZONE).date()
     start_date = end_date - pd.DateOffset(months=ANALIZ_SURESI_AY)
@@ -124,12 +125,14 @@ def run_fonaliz_scan(gc, fon_listesi):
                 if metrikler:
                     analiz_sonuclari.append({'Fon Kodu': fon_kodu, 'Fon Adı': fon_adi, **metrikler})
 
-    print(f"\n✅ Analiz tamamlandı. Sonuçlar Google Sheets'e yazılıyor...")
+    print(f"✅ Analiz tamamlandı. {len(analiz_sonuclari)} fon için metrikler hesaplandı.")
+    print(f"\n[ADIM 4/4] Sonuçlar Google Sheets'teki '{WORKSHEET_NAME_OUTPUT}' sayfasına yazılıyor...")
     
     try:
         spreadsheet = gc.open_by_key(SHEET_ID)
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME_OUTPUT)
         worksheet.clear()
+        print(f"ℹ️ '{WORKSHEET_NAME_OUTPUT}' sayfası temizlendi.")
 
         if analiz_sonuclari:
             df_sonuc = pd.DataFrame(analiz_sonuclari)
@@ -140,18 +143,20 @@ def run_fonaliz_scan(gc, fon_listesi):
 
             # A2'den başlayarak yaz
             worksheet.update('A2', [df_sonuc.columns.values.tolist()] + df_sonuc.values.tolist())
+            print(f"✅ {len(analiz_sonuclari)} adet fon verisi '{WORKSHEET_NAME_OUTPUT}' sayfasına yazıldı.")
         else:
-            print("ℹ️ Analiz edilecek veri bulunamadı, sayfa temizlendi.")
+            print("ℹ️ Analiz edilecek veri bulunamadı, sayfa temizlendi ancak veri yazılmadı.")
 
         # I1 hücresine zaman damgası yaz
         timestamp_str = "Son Tarama: " + datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
         worksheet.update_acell('I1', timestamp_str)
+        print(f"✅ Tarama zamanı ('{timestamp_str}') I1 hücresine başarıyla yazıldı.")
         
         body_resize = {"requests": [{"autoResizeDimensions": {"dimensions": {"sheetId": worksheet.id, "dimension": "COLUMNS"}}}]}
         spreadsheet.batch_update(body_resize)
-        print("✅ Google Sheets güncellendi.")
+        print("✅ Google Sheets 'Fonanaliz' sayfası başarıyla güncellendi ve sütunlar otomatik boyutlandırıldı.")
     except Exception as e:
-        print(f"❌ Google Sheets'e yazma hatası: {e}")
+        print(f"❌ Google Sheets'e yazma hatası: {e}. 'Fonanaliz' sayfası güncellenemedi.")
 
     print(f"--- Detaylı Analiz Bitti. Toplam Süre: {time.time() - start_time_main:.2f} saniye ---")
 

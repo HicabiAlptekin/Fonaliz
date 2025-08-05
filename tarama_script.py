@@ -28,31 +28,31 @@ NUM_WEEKS_TO_SCAN = 2 # Kaç hafta geriye dönük taranacak
 
 # --- Yardımcı Fonksiyonlar ---
 def google_sheets_auth():
-    print("\nGoogle Sheets için kimlik doğrulaması yapılıyor...")
+    print("\n[ADIM 1/5] Google Sheets için kimlik doğrulaması yapılıyor...")
     try:
         if not GSPREAD_CREDENTIALS_SECRET:
-            print("❌ Hata: GCP_SERVICE_ACCOUNT_KEY secret bulunamadı.")
+            print("❌ Hata: GCP_SERVICE_ACCOUNT_KEY secret bulunamadı. Kimlik doğrulama başarısız.")
             sys.exit(1)
         creds_json = json.loads(GSPREAD_CREDENTIALS_SECRET)
         gc = gspread.service_account_from_dict(creds_json)
         print("✅ Kimlik doğrulama başarılı.")
         return gc
     except Exception as e:
-        print(f"❌ Kimlik doğrulama sırasında hata oluştu: {e}")
+        print(f"❌ Kimlik doğrulama sırasında hata oluştu: {e}. İşlem durduruldu.")
         sys.exit(1)
 
 def load_takasbank_fund_list():
-    print(f"Takasbank'tan güncel fon listesi yükleniyor...")
+    print(f"\n[ADIM 2/5] Takasbank'tan güncel fon listesi yükleniyor...")
     try:
         df_excel = pd.read_excel(TAKASBANK_EXCEL_URL, engine='openpyxl')
         df_data = df_excel[['Fon Adı', 'Fon Kodu']].copy()
         df_data['Fon Kodu'] = df_data['Fon Kodu'].astype(str).str.strip().str.upper()
         df_data.dropna(subset=['Fon Kodu'], inplace=True)
         df_data = df_data[df_data['Fon Kodu'] != '']
-        print(f"✅ {len(df_data)} adet fon bilgisi okundu.")
+        print(f"✅ {len(df_data)} adet fon bilgisi başarıyla okundu.")
         return df_data
     except Exception as e:
-        print(f"❌ Takasbank Excel yükleme hatası: {e}")
+        print(f"❌ Takasbank Excel yükleme hatası: {e}. Fon listesi alınamadı.")
         return pd.DataFrame()
 
 def get_price_on_or_before(df_fund_history, target_date: date):
@@ -97,6 +97,7 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
     print("\n" + "="*40)
     print("     HAFTALIK İVMELENME TARAMASI BAŞLATILIYOR")
     print("="*40)
+    print(f"[ADIM 3/5] Fon verileri TEFAS'tan çekiliyor ve haftalık getiriler hesaplanıyor...")
 
     genel_veri_cekme_baslangic_tarihi = today - timedelta(days=(num_weeks * 7) + 21)
     tasks = [(fon_kodu, genel_veri_cekme_baslangic_tarihi, today) for fon_kodu in all_fon_data_df['Fon Kodu'].unique()]
@@ -135,33 +136,33 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
     results_df = pd.DataFrame(list(weekly_results_dict.values()))
     
     if results_df.empty:
-        print("\nAnaliz edilecek yeterli veri bulunamadı.")
+        print("\nAnaliz edilecek yeterli veri bulunamadı. İşlem durduruldu.")
         return
 
-    # Filtreleme
-    print(f"\nFiltreleme uygulanıyor: Toplam Getiri >= 2%")
+    print(f"✅ Toplam {len(results_df)} fonun haftalık getirisi hesaplandı.")
+    print(f"\n[ADIM 4/5] Fonlar filtreleniyor (Toplam Getiri >= 2%)...")
     filtrelenmis_df = results_df[results_df['Toplam_Getiri'] >= 2].copy()
     
     # Debug sütunları ekle
     filtrelenmis_df['_DEBUG_WeeklyChanges_RAW'] = filtrelenmis_df['Toplam_Getiri']
     filtrelenmis_df['_DEBUG_IsDesiredTrend'] = filtrelenmis_df['Toplam_Getiri'] >= 2
     
-    # --- YENİ TEŞHİS BLOĞU ---
-    print(f"Toplam {len(results_df)} fonun haftalık getirisi hesaplandı.")
     print(f"Filtreleme sonrası {len(filtrelenmis_df)} fon kaldı.")
     if filtrelenmis_df.empty:
-        print("UYARI: Filtreyi geçen hiçbir fon bulunamadı. 'haftalık' sayfası boş bırakılacak.")
-    # --- YENİ TEŞHİS BLOĞU SONU ---
+        print("⚠️ UYARI: Filtreyi geçen hiçbir fon bulunamadı. 'haftalık' sayfası boş bırakılacak.")
+    else:
+        print("✅ Filtreleme başarılı. İlk 5 filtrelenmiş fonun başlığı:")
+        print(filtrelenmis_df[['Fon Kodu', 'Toplam_Getiri', '_DEBUG_WeeklyChanges_RAW', '_DEBUG_IsDesiredTrend']].head())
 
     filtrelenmis_df.sort_values(by='Toplam_Getiri', ascending=False, inplace=True)
     
-    print(f"\n✅ Haftalık tarama tamamlandı. {len(filtrelenmis_df)} fon filtreden geçti.")
-    print(f"Sonuçlar Google Sheets'teki '{WORKSHEET_NAME_WEEKLY}' sayfasına yazılıyor...")
+    print(f"\n[ADIM 5/5] Sonuçlar Google Sheets'teki '{WORKSHEET_NAME_WEEKLY}' sayfasına yazılıyor...")
 
     try:
         spreadsheet = gc.open_by_key(SHEET_ID)
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME_WEEKLY)
         worksheet.clear()
+        print(f"ℹ️ '{WORKSHEET_NAME_WEEKLY}' sayfası temizlendi.")
         
         # Sadece istenen sütunları yaz
         output_columns = ['Fon Kodu', 'Fon Adı', 'Hafta_1_Getiri', 'Hafta_2_Getiri', 'Toplam_Getiri', '_DEBUG_WeeklyChanges_RAW', '_DEBUG_IsDesiredTrend']
@@ -171,9 +172,9 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
         
         body_resize = {"requests": [{"autoResizeDimensions": {"dimensions": {"sheetId": worksheet.id, "dimension": "COLUMNS"}}}]}
         spreadsheet.batch_update(body_resize)
-        print("✅ Google Sheets güncellendi.")
+        print("✅ Google Sheets 'haftalık' sayfası başarıyla güncellendi.")
     except Exception as e:
-        print(f"❌ Google Sheets'e yazma hatası: {e}")
+        print(f"❌ Google Sheets'e yazma hatası: {e}. 'haftalık' sayfası güncellenemedi.")
 
     print(f"--- Haftalık Tarama Bitti. Toplam Süre: {time.time() - start_time_main:.2f} saniye ---")
 
