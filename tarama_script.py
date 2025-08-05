@@ -142,6 +142,10 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
     print(f"\nFiltreleme uygulanıyor: Toplam Getiri >= 2%")
     filtrelenmis_df = results_df[results_df['Toplam_Getiri'] >= 2].copy()
     
+    # Debug sütunları ekle
+    filtrelenmis_df['_DEBUG_WeeklyChanges_RAW'] = filtrelenmis_df['Toplam_Getiri']
+    filtrelenmis_df['_DEBUG_IsDesiredTrend'] = filtrelenmis_df['Toplam_Getiri'] >= 2
+    
     # --- YENİ TEŞHİS BLOĞU ---
     print(f"Toplam {len(results_df)} fonun haftalık getirisi hesaplandı.")
     print(f"Filtreleme sonrası {len(filtrelenmis_df)} fon kaldı.")
@@ -160,7 +164,7 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
         worksheet.clear()
         
         # Sadece istenen sütunları yaz
-        output_columns = ['Fon Kodu', 'Fon Adı', 'Hafta_1_Getiri', 'Hafta_2_Getiri', 'Toplam_Getiri']
+        output_columns = ['Fon Kodu', 'Fon Adı', 'Hafta_1_Getiri', 'Hafta_2_Getiri', 'Toplam_Getiri', '_DEBUG_WeeklyChanges_RAW', '_DEBUG_IsDesiredTrend']
         df_to_write = filtrelenmis_df[output_columns]
         
         worksheet.update([df_to_write.columns.values.tolist()] + df_to_write.values.tolist())
