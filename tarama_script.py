@@ -139,7 +139,16 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
         return
 
     # Filtreleme
+    print(f"\nFiltreleme uygulanıyor: Toplam Getiri >= 2%")
     filtrelenmis_df = results_df[results_df['Toplam_Getiri'] >= 2].copy()
+    
+    # --- YENİ TEŞHİS BLOĞU ---
+    print(f"Toplam {len(results_df)} fonun haftalık getirisi hesaplandı.")
+    print(f"Filtreleme sonrası {len(filtrelenmis_df)} fon kaldı.")
+    if filtrelenmis_df.empty:
+        print("UYARI: Filtreyi geçen hiçbir fon bulunamadı. 'haftalık' sayfası boş bırakılacak.")
+    # --- YENİ TEŞHİS BLOĞU SONU ---
+
     filtrelenmis_df.sort_values(by='Toplam_Getiri', ascending=False, inplace=True)
     
     print(f"\n✅ Haftalık tarama tamamlandı. {len(filtrelenmis_df)} fon filtreden geçti.")
