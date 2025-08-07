@@ -70,8 +70,11 @@ def calculate_change(current_price, past_price):
     except (ValueError, TypeError): return np.nan
 
 def fetch_data_for_fund_parallel(args):
-    fon_kodu, start_date_overall, end_date_overall = args
+    fon_kodu, start_date_overall, end_date_overall, bekleme_suresi = args
     try:
+        if bekleme_suresi > 0:
+            time.sleep(random.uniform(bekleme_suresi, bekleme_suresi + 1.0))
+
         crawler = Crawler()
         df = crawler.fetch(
             start=start_date_overall.strftime("%Y-%m-%d"),
@@ -79,11 +82,13 @@ def fetch_data_for_fund_parallel(args):
             name=fon_kodu,
             columns=["date", "price", "title"]
         )
-        if df.empty: return fon_kodu, None
+        if df.empty:
+            return fon_kodu, None, "Veri bulunamadı veya boş döndü."
         df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
-        return fon_kodu, df.sort_values(by='date').reset_index(drop=True)
-    except Exception:
-        return fon_kodu, None
+        return fon_kodu, df.sort_values(by='date').reset_index(drop=True), None
+    except Exception as e:
+        error_message = str(e)
+        return fon_kodu, None, error_message
 
 def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
     start_time_main = time.time()
@@ -97,46 +102,118 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
     print("\n" + "="*40)
     print("     HAFTALIK İVMELENME TARAMASI BAŞLATILIYOR")
     print("="*40)
-    print(f"[ADIM 3/5] Fon verileri TEFAS'tan çekiliyor ve haftalık getiriler hesaplanıyor...")
 
     genel_veri_cekme_baslangic_tarihi = today - timedelta(days=(num_weeks * 7) + 21)
-    tasks = [(fon_kodu, genel_veri_cekme_baslangic_tarihi, today) for fon_kodu in all_fon_data_df['Fon Kodu'].unique()]
+    all_fon_codes = all_fon_data_df['Fon Kodu'].unique().tolist()
     
+    successful_funds_data = {}
+    failed_funds_by_stage = {}
+    
+    # Tarama Aşamaları Tanımları
+    stages = [
+        {"name": "1. Aşama (Hızlı)", "max_workers": 10, "bekleme_suresi": 0},
+        {"name": "2. Aşama (Orta)", "max_workers": 4, "bekleme_suresi": 1.5},
+        {"name": "3. Aşama (Yavaş)", "max_workers": 2, "bekleme_suresi": 3.0}
+    ]
+
+    current_fon_codes_to_process = all_fon_codes
+
+    for i, stage in enumerate(stages):
+        if not current_fon_codes_to_process:
+            print(f"Tüm fonlar başarıyla işlendi, {stage['name']} atlanıyor.")
+            break
+
+        print(f"\n[ADIM 3/{i+1}/5] {stage['name']} başlatılıyor ({len(current_fon_codes_to_process)} fon için)...")
+        
+        tasks = [(fon_kodu, genel_veri_cekme_baslangic_tarihi, today, stage["bekleme_suresi"]) for fon_kodu in current_fon_codes_to_process]
+        
+        stage_successful_funds = {}
+        stage_failed_funds = {}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=stage["max_workers"]) as executor:
+            future_to_fon = {executor.submit(fetch_data_for_fund_parallel, args): args[0] for args in tasks}
+            progress_bar = tqdm(concurrent.futures.as_completed(future_to_fon), total=len(tasks), desc=f"{stage['name']} Tarama")
+
+            for future in progress_bar:
+                fon_kodu, fund_history, error_message = future.result()
+                if error_message is None: # Başarılı
+                    stage_successful_funds[fon_kodu] = fund_history
+                else: # Başarısız
+                    stage_failed_funds[fon_kodu] = error_message
+        
+        successful_funds_data.update(stage_successful_funds)
+        failed_funds_by_stage[stage["name"]] = stage_failed_funds
+        current_fon_codes_to_process = list(stage_failed_funds.keys()) # Bir sonraki aşama için başarısız olanları al
+
+        print(f"✅ {stage['name']} tamamlandı. Başarılı: {len(stage_successful_funds)}, Başarısız: {len(stage_failed_funds)}")
+
+    # Tüm aşamalardan gelen başarılı fonları işleme
     weekly_results_dict = {}
+    print("\n[ADIM 4/5] Başarılı fonların haftalık getirileri hesaplanıyor...")
+    for fon_kodu, fund_history in successful_funds_data.items():
+        if fund_history is None or fund_history.empty: continue # Should not happen if successful_funds_data only contains successful ones
+
+        fon_adi = all_fon_data_df.loc[all_fon_data_df['Fon Kodu'] == fon_kodu, 'Fon Adı'].iloc[0]
+        current_fon_data = {'Fon Kodu': fon_kodu, 'Fon Adı': fon_adi}
+        
+        weekly_changes = []
+        current_week_end_date = today
+        for i in range(num_weeks):
+            current_week_start_date = current_week_end_date - timedelta(days=7)
+            price_end = get_price_on_or_before(fund_history, current_week_end_date)
+            price_start = get_price_on_or_before(fund_history, current_week_start_date)
+            
+            col_name = f"Hafta_{i+1}_Getiri"
+            change = calculate_change(price_end, price_start)
+            current_fon_data[col_name] = change
+            weekly_changes.append(change)
+            current_week_end_date = current_week_start_date
+        
+        valid_changes = [c for c in weekly_changes if pd.notna(c)]
+        if len(valid_changes) == num_weeks:
+             current_fon_data['Toplam_Getiri'] = sum(valid_changes)
+             weekly_results_dict[fon_kodu] = current_fon_data
+
+    results_df = pd.DataFrame(list(weekly_results_dict.values()))
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_fon = {executor.submit(fetch_data_for_fund_parallel, args): args[0] for args in tasks}
-        progress_bar = tqdm(concurrent.futures.as_completed(future_to_fon), total=len(tasks), desc="Haftalık Tarama")
-
-        for future in progress_bar:
-            fon_kodu, fund_history = future.result()
-            if fund_history is None or fund_history.empty: continue
-
-            fon_adi = all_fon_data_df.loc[all_fon_data_df['Fon Kodu'] == fon_kodu, 'Fon Adı'].iloc[0]
-            current_fon_data = {'Fon Kodu': fon_kodu, 'Fon Adı': fon_adi}
-            
-            weekly_changes = []
-            current_week_end_date = today
-            for i in range(num_weeks):
-                current_week_start_date = current_week_end_date - timedelta(days=7)
-                price_end = get_price_on_or_before(fund_history, current_week_end_date)
-                price_start = get_price_on_or_before(fund_history, current_week_start_date)
-                
-                col_name = f"Hafta_{i+1}_Getiri"
-                change = calculate_change(price_end, price_start)
-                current_fon_data[col_name] = change
-                weekly_changes.append(change)
-                current_week_end_date = current_week_start_date
-            
-            valid_changes = [c for c in weekly_changes if pd.notna(c)]
-            if len(valid_changes) == num_weeks:
-                 current_fon_data['Toplam_Getiri'] = sum(valid_changes)
-                 weekly_results_dict[fon_kodu] = current_fon_data
-
     results_df = pd.DataFrame(list(weekly_results_dict.values()))
     
     if results_df.empty:
         print("\nAnaliz edilecek yeterli veri bulunamadı. İşlem durduruldu.")
+        # Özet Raporu (Bu durumda da gösterilmeli)
+        toplam_fon_sayisi = len(all_fon_codes)
+        basarili_fon_sayisi = len(successful_funds_data)
+        nihai_basarisiz_fonlar = current_fon_codes_to_process # Son aşamada kalan başarısızlar
+        
+        ozet_metni = f"""
+--- Analiz Özet Raporu ({datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}) ---
+Toplam Analize Alınan Fon Sayısı: {toplam_fon_sayisi}
+Başarıyla Analiz Edilen Fon Sayısı: {basarili_fon_sayisi}
+Nihai Başarısız Fon Sayısı: {len(nihai_basarisiz_fonlar)}
+
+Aşamalara Göre Başarısız Olan Fonlar:
+"""
+        for stage_name, failed_funds in failed_funds_by_stage.items():
+            ozet_metni += f"- {stage_name}: {len(failed_funds)} fon başarısız oldu.\n"
+            if failed_funds:
+                ozet_metni += "  Detaylar:\n"
+                for fon_kodu, sebep in failed_funds.items():
+                    ozet_metni += f"  - {fon_kodu}: {sebep}\n"
+            else:
+                ozet_metni += "  Tüm fonlar bu aşamada başarılı oldu.\n"
+
+        ozet_metni += """
+Olası Genel Hata Nedenleri:
+- TEFAS web sitesi, kısa sürede yapılan çok sayıda isteği engellemek için 'Rate Limiting' (erişim kısıtlaması) uygulamaktadır.
+- Veri çekme işlemi sırasında internet bağlantısı kaynaklı zaman aşımları ('Timeout') yaşanmış olabilir.
+- Listede yer alan bazı fon kodları güncel olmayabilir veya TEFAS platformunda bulunamayabilir.
+"""
+        print(ozet_metni)
+        ozet_dosya_adi = "analiz_ozeti.txt"
+        with open(ozet_dosya_adi, "w", encoding="utf-8") as f:
+            f.write(ozet_metni)
+        print(f"Özet rapor '{ozet_dosya_adi}' dosyasına da kaydedildi.")
+        print(f"--- Haftalık Tarama Bitti. Toplam Süre: {time.time() - start_time_main:.2f} saniye ---")
         return
 
     print(f"✅ Toplam {len(results_df)} fonun haftalık getirisi hesaplandı.")
@@ -170,13 +247,46 @@ def run_acceleration_scan_and_write_to_sheet(gc, num_weeks: int):
         
         worksheet.update([df_to_write.columns.values.tolist()] + df_to_write.values.tolist())
         
-        body_resize = {"requests": [{"autoResizeDimensions": {"dimensions": {"sheetId": worksheet.id, "dimension": "COLUMNS"}}}]}
+        body_resize = {"requests": [{"autoResizeDimensions": {"dimensions": {"sheetId": worksheet.id, "dimension": "COLUMNS"}}}}]}
         spreadsheet.batch_update(body_resize)
         print("✅ Google Sheets 'haftalık' sayfası başarıyla güncellendi.")
     except Exception as e:
         print(f"❌ Google Sheets'e yazma hatası: {e}. 'haftalık' sayfası güncellenemedi.")
 
     print(f"--- Haftalık Tarama Bitti. Toplam Süre: {time.time() - start_time_main:.2f} saniye ---")
+
+    # Özet Raporu
+    toplam_fon_sayisi = len(all_fon_codes)
+    basarili_fon_sayisi = len(successful_funds_data)
+    nihai_basarisiz_fonlar = current_fon_codes_to_process # Son aşamada kalan başarısızlar
+    
+    ozet_metni = f"""
+--- Analiz Özet Raporu ({datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}) ---
+Toplam Analize Alınan Fon Sayısı: {toplam_fon_sayisi}
+Başarıyla Analiz Edilen Fon Sayısı: {basarili_fon_sayisi}
+Nihai Başarısız Fon Sayısı: {len(nihai_basarisiz_fonlar)}
+
+Aşamalara Göre Başarısız Olan Fonlar:
+"""
+    for stage_name, failed_funds in failed_funds_by_stage.items():
+        ozet_metni += f"- {stage_name}: {len(failed_funds)} fon başarısız oldu.\n"
+        if failed_funds:
+            ozet_metni += "  Detaylar:\n"
+            for fon_kodu, sebep in failed_funds.items():
+                ozet_metni += f"  - {fon_kodu}: {sebep}\n"
+        else:
+            ozet_metni += "  Tüm fonlar bu aşamada başarılı oldu.\n"
+
+    ozet_metni += """
+Olası Genel Hata Nedenleri:
+- TEFAS web sitesi, kısa sürede yapılan çok sayıda isteği engellemek için 'Rate Limiting' (erişim kısıtlaması) uygulamaktadır.
+- Veri çekme işlemi sırasında internet bağlantısı kaynaklı zaman aşımları ('Timeout') yaşanmış olabilir.
+- Listede yer alan bazı fon kodları güncel olmayabilir veya TEFAS platformunda bulunamayabilir.
+"""
+    print(ozet_metni)
+    ozet_dosya_adi = "analiz_ozeti.txt"
+    with open(ozet_dosya_adi, "w", encoding="utf-8") as f:
+        f.write(ozet_metni)
 
 # --- ANA ÇALIŞTIRMA BLOĞU ---
 if __name__ == "__main__":
