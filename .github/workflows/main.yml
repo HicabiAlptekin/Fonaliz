@@ -32,7 +32,7 @@ jobs:
           echo "📦 Bağımlılıklar yükleniyor..."
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
-            echo "requirements.txt bulundu, bağımlılıklar yükleniyor:"
+            echo "requirements.txt bulundu, içeriği:"
             cat requirements.txt
             pip install -r requirements.txt
           else
@@ -45,6 +45,14 @@ jobs:
           echo "📊 Fon listesi oluşturuluyor..."
           if [ -f tarama_script.py ]; then
             python tarama_script.py weekly 2
+            echo "tarama_script.py çalıştırıldı, çıktılar kontrol ediliyor..."
+            if [ -f filtrelenmis_fonlar.txt ]; then
+              echo "filtrelenmis_fonlar.txt bulundu, içeriği:"
+              cat filtrelenmis_fonlar.txt
+            else
+              echo "Hata: filtrelenmis_fonlar.txt oluşturulmadı!"
+              exit 1
+            fi
           else
             echo "Hata: tarama_script.py bulunamadı!"
             exit 1
@@ -54,7 +62,12 @@ jobs:
         run: |
           echo "📈 Dinamik analiz başlatılıyor..."
           if [ -f analiz_script.py ]; then
-            python analiz_script.py
+            if [ -f filtrelenmis_fonlar.txt ]; then
+              python analiz_script.py
+            else
+              echo "Hata: filtrelenmis_fonlar.txt bulunamadı!"
+              exit 1
+            fi
           else
             echo "Hata: analiz_script.py bulunamadı!"
             exit 1
