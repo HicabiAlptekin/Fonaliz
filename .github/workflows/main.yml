@@ -17,6 +17,11 @@ jobs:
       - name: Depoyu Kopyala
         uses: actions/checkout@v4
 
+      - name: Dizin İçeriğini Listele
+        run: |
+          echo "📂 Depo içeriği listeleniyor..."
+          ls -la
+
       - name: Python 3.10 Kurulumu
         uses: actions/setup-python@v4
         with:
@@ -24,11 +29,15 @@ jobs:
 
       - name: Bağımlılıkları Yükle
         run: |
+          echo "📦 Bağımlılıklar yükleniyor..."
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
+            echo "requirements.txt bulundu, bağımlılıklar yükleniyor:"
+            cat requirements.txt
             pip install -r requirements.txt
           else
-            echo "requirements.txt bulunamadı, bağımlılık yüklemesi atlanıyor."
+            echo "Hata: requirements.txt bulunamadı!"
+            exit 1
           fi
 
       - name: Adım 1 - Fon Listesi Oluştur
@@ -50,6 +59,11 @@ jobs:
             echo "Hata: analiz_script.py bulunamadı!"
             exit 1
           fi
+
+      - name: Çıktı Dosyalarını Listele
+        run: |
+          echo "📄 Üretilen çıktı dosyaları listeleniyor..."
+          find . -name "*.xlsx" -o -name "*.txt" || echo "Çıktı dosyası bulunamadı."
 
       - name: Analiz Sonuçlarını Kaydet
         if: always()  # Önceki adımlar başarısız olsa bile çalışır
