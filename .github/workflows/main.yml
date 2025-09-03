@@ -30,6 +30,7 @@ jobs:
           else
             echo "requirements.txt bulunamadı!"
             exit 1
+          fi
 
       - name: Adım 1: Fon Listesi Oluştur
         run: |
