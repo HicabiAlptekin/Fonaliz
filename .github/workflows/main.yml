@@ -28,24 +28,36 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            echo "requirements.txt bulunamadı!"
-            exit 1
+            echo "requirements.txt bulunamadı, bağımlılık yüklemesi atlanıyor."
           fi
 
       - name: Adım 1 - Fon Listesi Oluştur
         run: |
           echo "📊 Fon listesi oluşturuluyor..."
-          python tarama_script.py weekly 2
+          if [ -f tarama_script.py ]; then
+            python tarama_script.py weekly 2
+          else
+            echo "Hata: tarama_script.py bulunamadı!"
+            exit 1
+          fi
 
       - name: Adım 2 - Dinamik Analiz Yap
         run: |
           echo "📈 Dinamik analiz başlatılıyor..."
-          python analiz_script.py
+          if [ -f analiz_script.py ]; then
+            python analiz_script.py
+          else
+            echo "Hata: analiz_script.py bulunamadı!"
+            exit 1
+          fi
 
       - name: Analiz Sonuçlarını Kaydet
+        if: always()  # Önceki adımlar başarısız olsa bile çalışır
         uses: actions/upload-artifact@v4
         with:
           name: analiz-sonuclari-${{ github.run_id }}
           path: |
             *.xlsx
             *.txt
+          retention-days: 7
+        continue-on-error: true  # Dosya bulunamazsa hata vermez
