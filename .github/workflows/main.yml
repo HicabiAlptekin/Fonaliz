@@ -32,12 +32,12 @@ jobs:
             exit 1
           fi
 
-      - name: Adım 1: Fon Listesi Oluştur
+      - name: Adım 1 - Fon Listesi Oluştur
         run: |
           echo "📊 Fon listesi oluşturuluyor..."
           python tarama_script.py weekly 2
 
-      - name: Adım 2: Dinamik Analiz Yap
+      - name: Adım 2 - Dinamik Analiz Yap
         run: |
           echo "📈 Dinamik analiz başlatılıyor..."
           python analiz_script.py
