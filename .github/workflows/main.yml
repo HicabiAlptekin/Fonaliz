@@ -12,6 +12,7 @@ on:
 jobs:
   build-and-analyze:
     runs-on: ubuntu-latest
+
     steps:
       - name: Depoyu Kopyala
         uses: actions/checkout@v4
@@ -31,11 +32,14 @@ jobs:
             exit 1
 
       - name: Adım 1: Fon Listesi Oluştur
-        # Son 2 haftalık getiriye göre filtreleme yapılır
-        run: python tarama_script.py weekly 2
+        run: |
+          echo "📊 Fon listesi oluşturuluyor..."
+          python tarama_script.py weekly 2
 
       - name: Adım 2: Dinamik Analiz Yap
-        run: python analiz_script.py
+        run: |
+          echo "📈 Dinamik analiz başlatılıyor..."
+          python analiz_script.py
 
       - name: Analiz Sonuçlarını Kaydet
         uses: actions/upload-artifact@v4
