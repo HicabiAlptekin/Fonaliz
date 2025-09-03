@@ -2,9 +2,11 @@ name: OtoFon Dinamik Analiz
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   schedule:
-    - cron: '15 8 * * 1-5'  # Türkiye saati ile 11:15 (UTC+3)
+    # Her iş günü Türkiye saati ile saat 11:15 (UTC 08:15)
+    - cron: '15 8 * * 1-5'
   workflow_dispatch: {}
 
 jobs:
